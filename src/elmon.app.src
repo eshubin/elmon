@@ -1,0 +1,12 @@
+{application, elmon,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { elmon_app, []}},
+  {env, []}
+ ]}.
