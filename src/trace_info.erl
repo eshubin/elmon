@@ -38,7 +38,10 @@ terminate(_Reason, #state{trace_target = TraceTargets}) ->
     ok.
 
 handle_info(Info, State) ->
-    error_logger:info_msg("received event: ~p", [Info]),
+    error_logger:info_msg("received event: ~p~n", [Info]),
+    {_, _, _, {M, F, Args}}  = Info,
+    TraceInfo = erlang:trace_info({M, F, length(Args)}, call_time),
+    error_logger:info_msg("trace info: ~p~n", [TraceInfo]),
     reporter:notify(Info),
     {noreply, State}.
 
@@ -52,8 +55,9 @@ toggle_trace(Enabled) ->
 
 toggle_trace_pattern(Enabled, TraceTargets) ->
     lists:foreach(
-        fun(MFA) ->
-            1 = erlang:trace_pattern(MFA, Enabled, [call_time])
+        fun({Module, _, _} = MFA) ->
+            {module, Module} = code:load_file(Module),
+            1 = erlang:trace_pattern(MFA, Enabled, [local, call_time])
         end,
         TraceTargets
     ).
@@ -87,7 +91,6 @@ trace_test_() ->
         fun() ->
             reporter:start_link(),
             msg_accumulator:start(),
-            timer:sleep(0),
             start_link([{timer, sleep, 1}])
         end,
         fun(_) ->
@@ -98,8 +101,9 @@ trace_test_() ->
     }.
 
 test_sleep_tracing() ->
-    spawn(timer, sleep, [500]),
+%%     spawn(timer, sleep, [5000]),
     timer:sleep(500),
+    timer:sleep(1000),
     ?assertEqual(
         1,
         msg_accumulator:get_message()
