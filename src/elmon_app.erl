@@ -10,7 +10,9 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
-    elmon_sup:start_link().
+    {ok, TraceTargets} = application:get_env(elmon, trace_targets),
+    elmon_sup:start_link(TraceTargets).
 
 stop(_State) ->
     ok.
+

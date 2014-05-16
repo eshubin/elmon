@@ -1,159 +1,106 @@
-%%%-------------------------------------------------------------------
-%%% @author eugene
-%%% @copyright (C) 2014, <COMPANY>
-%%% @doc
-%%%
-%%% @end
-%%% Created : 05. May 2014 18:49
-%%%-------------------------------------------------------------------
 -module(trace_info).
--author("eugene").
 
--behaviour(gen_event).
+-behaviour(gen_server).
 
 %% API
--export([start_link/0,
-    add_handler/0]).
+-export([start_link/1]).
 
 %% gen_event callbacks
--export([init/1,
-    handle_event/2,
-    handle_call/2,
-    handle_info/2,
+-export([
+    init/1,
     terminate/2,
-    code_change/3]).
+    handle_info/2
+    ]).
 
 -define(SERVER, ?MODULE).
 
--record(state, {}).
+-record(state, {
+    trace_target
+}).
+
+start_link(TraceTargets) ->
+    gen_server:start_link({local, ?SERVER}, ?SERVER, TraceTargets, []).
+
 
 %%%===================================================================
-%%% gen_event callbacks
+%%% gen_server callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Creates an event manager
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(start_link() -> {ok, pid()} | {error, {already_started, pid()}}).
-start_link() ->
-    gen_event:start_link({local, ?SERVER}).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Adds an event handler
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(add_handler() -> ok | {'EXIT', Reason :: term()} | term()).
-add_handler() ->
-    gen_event:add_handler(?SERVER, ?MODULE, []).
+init(TraceTargets) ->
+    toggle_trace(true),
+    toggle_trace_pattern(true, TraceTargets),
+    {ok, #state{trace_target = TraceTargets}}.
 
-%%%===================================================================
-%%% gen_event callbacks
-%%%===================================================================
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever a new event handler is added to an event manager,
-%% this function is called to initialize the event handler.
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(init(InitArgs :: term()) ->
-    {ok, State :: #state{}} |
-    {ok, State :: #state{}, hibernate} |
-    {error, Reason :: term()}).
-init([]) ->
-    {ok, #state{}}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever an event manager receives an event sent using
-%% gen_event:notify/2 or gen_event:sync_notify/2, this function is
-%% called for each installed event handler to handle the event.
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_event(Event :: term(), State :: #state{}) ->
-    {ok, NewState :: #state{}} |
-    {ok, NewState :: #state{}, hibernate} |
-    {swap_handler, Args1 :: term(), NewState :: #state{},
-        Handler2 :: (atom() | {atom(), Id :: term()}), Args2 :: term()} |
-    remove_handler).
-handle_event(_Event, State) ->
-    {ok, State}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever an event manager receives a request sent using
-%% gen_event:call/3,4, this function is called for the specified
-%% event handler to handle the request.
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_call(Request :: term(), State :: #state{}) ->
-    {ok, Reply :: term(), NewState :: #state{}} |
-    {ok, Reply :: term(), NewState :: #state{}, hibernate} |
-    {swap_handler, Reply :: term(), Args1 :: term(), NewState :: #state{},
-        Handler2 :: (atom() | {atom(), Id :: term()}), Args2 :: term()} |
-    {remove_handler, Reply :: term()}).
-handle_call(_Request, State) ->
-    Reply = ok,
-    {ok, Reply, State}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called for each installed event handler when
-%% an event manager receives any other message than an event or a
-%% synchronous request (or a system message).
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_info(Info :: term(), State :: #state{}) ->
-    {ok, NewState :: #state{}} |
-    {ok, NewState :: #state{}, hibernate} |
-    {swap_handler, Args1 :: term(), NewState :: #state{},
-        Handler2 :: (atom() | {atom(), Id :: term()}), Args2 :: term()} |
-    remove_handler).
-handle_info(_Info, State) ->
-    {ok, State}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever an event handler is deleted from an event manager, this
-%% function is called. It should be the opposite of Module:init/1 and
-%% do any necessary cleaning up.
-%%
-%% @spec terminate(Reason, State) -> void()
-%% @end
-%%--------------------------------------------------------------------
--spec(terminate(Args :: (term() | {stop, Reason :: term()} | stop |
-remove_handler | {error, {'EXIT', Reason :: term()}} |
-{error, term()}), State :: term()) -> term()).
-terminate(_Arg, _State) ->
+terminate(_Reason, #state{trace_target = TraceTargets}) ->
+    toggle_trace_pattern(false, TraceTargets),
+    toggle_trace(false),
     ok.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Convert process state when code is changed
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(code_change(OldVsn :: term() | {down, term()}, State :: #state{},
-    Extra :: term()) ->
-    {ok, NewState :: #state{}}).
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+handle_info(Info, State) ->
+    error_logger:info_msg("received event: ~p", [Info]),
+    reporter:notify(Info),
+    {noreply, State}.
+
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+toggle_trace(Enabled) ->
+    0 = erlang:trace(new, Enabled, [call]).
+
+toggle_trace_pattern(Enabled, TraceTargets) ->
+    lists:foreach(
+        fun(MFA) ->
+            1 = erlang:trace_pattern(MFA, Enabled, [call_time])
+        end,
+        TraceTargets
+    ).
+
+%%%===================================================================
+%%% Tests
+%%%===================================================================
+
+-include_lib("eunit/include/eunit.hrl").
+
+cleanup_test44() ->
+    timer:sleep(0),
+    {ok, TracePid} = start_link([{timer, sleep, 1}]),
+    {ok, TestPid} = gen_event:start_link(),
+
+    ?assertEqual(
+        {tracer, TracePid},
+        erlang:trace_info(TestPid, tracer)
+    ),
+
+    unlink(TracePid),
+    exit(TracePid, kill),
+    ?assertEqual(
+        {tracer, []},
+        erlang:trace_info(TestPid, tracer)
+    ).
+
+trace_test_() ->
+    {
+        setup,
+        fun() ->
+            reporter:start_link(),
+            msg_accumulator:start(),
+            timer:sleep(0),
+            start_link([{timer, sleep, 1}])
+        end,
+        fun(_) ->
+            [
+                fun test_sleep_tracing/0
+            ]
+        end
+    }.
+
+test_sleep_tracing() ->
+    spawn(timer, sleep, [500]),
+    timer:sleep(500),
+    ?assertEqual(
+        1,
+        msg_accumulator:get_message()
+    ).
