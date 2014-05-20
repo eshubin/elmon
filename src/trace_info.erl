@@ -1,5 +1,7 @@
 -module(trace_info).
 
+-include_lib("stdlib/include/ms_transform.hrl").
+
 -behaviour(gen_server).
 
 %% API
@@ -15,7 +17,8 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {
-    trace_target
+    trace_target,
+    call_records
 }).
 
 start_link(TraceTargets) ->
@@ -29,20 +32,62 @@ start_link(TraceTargets) ->
 
 init(TraceTargets) ->
     toggle_trace(true),
-    toggle_trace_pattern(true, TraceTargets),
-    {ok, #state{trace_target = TraceTargets}}.
 
-terminate(_Reason, #state{trace_target = TraceTargets}) ->
+    lists:foreach(
+        fun({Module, _, _}) ->
+            case code:is_sticky(Module) of
+                true -> ok;
+                false ->
+                    {module, Module} = code:load_file(Module)
+            end
+        end,
+        TraceTargets
+    ),
+
+    MatchSpec = dbg:fun2ms(fun(_)->
+        exception_trace()
+    end),
+    toggle_trace_pattern(MatchSpec, TraceTargets),
+    {ok, #state{
+        trace_target = TraceTargets,
+        call_records = ets:new(call_records, [private])}
+    }.
+
+terminate(
+    _Reason,
+    #state{
+        trace_target = TraceTargets,
+        call_records = CallRecords
+    }
+) ->
+    ets:delete(CallRecords),
     toggle_trace_pattern(false, TraceTargets),
     toggle_trace(false),
     ok.
 
-handle_info(Info, State) ->
-    error_logger:info_msg("received event: ~p~n", [Info]),
-    {_, _, _, {M, F, Args}}  = Info,
-    TraceInfo = erlang:trace_info({M, F, length(Args)}, call_time),
-    error_logger:info_msg("trace info: ~p~n", [TraceInfo]),
-    reporter:notify(Info),
+handle_info(
+    {trace_ts, Pid, call, {Mod, Fun, ArgList}, Timestamp} = Info,
+    #state{call_records = CallRecords} = State
+) ->
+    error_logger:info_msg("call: ~p~n", [Info]),
+    Key = {Pid, {Mod, Fun, length(ArgList)}},
+    true = ets:insert_new(CallRecords, {Key, Timestamp}),
+    {noreply, State};
+handle_info(
+    {trace_ts, Pid, return_from, {Mod, Fun, Arity},
+        ReturnValue, FinishTimestamp} = Info,
+    #state{call_records = CallRecords} = State
+) ->
+    error_logger:info_msg("return: ~p~n", [Info]),
+    Key = {Pid, {Mod, Fun, Arity}},
+    StartTimestamp = ets:lookup_element(CallRecords, Key, 2),
+    ets:delete(CallRecords, Key),
+    MonitorInfo = {
+        ReturnValue,
+        timer:now_diff(FinishTimestamp, StartTimestamp)
+    },
+    error_logger:info_msg("monitor: ~p~n", [MonitorInfo]),
+    reporter:notify(MonitorInfo),
     {noreply, State}.
 
 
@@ -51,13 +96,12 @@ handle_info(Info, State) ->
 %%%===================================================================
 
 toggle_trace(Enabled) ->
-    0 = erlang:trace(new, Enabled, [call]).
+    0 = erlang:trace(new, Enabled, [call, timestamp]).
 
-toggle_trace_pattern(Enabled, TraceTargets) ->
+toggle_trace_pattern(MatchSpec, TraceTargets) ->
     lists:foreach(
-        fun({Module, _, _} = MFA) ->
-            {module, Module} = code:load_file(Module),
-            1 = erlang:trace_pattern(MFA, Enabled, [local, call_time])
+        fun(MFA) ->
+            1 = erlang:trace_pattern(MFA, MatchSpec, [local])
         end,
         TraceTargets
     ).
@@ -68,7 +112,7 @@ toggle_trace_pattern(Enabled, TraceTargets) ->
 
 -include_lib("eunit/include/eunit.hrl").
 
-cleanup_test44() ->
+cleanup_test() ->
     timer:sleep(0),
     {ok, TracePid} = start_link([{timer, sleep, 1}]),
     {ok, TestPid} = gen_event:start_link(),
@@ -101,10 +145,9 @@ trace_test_() ->
     }.
 
 test_sleep_tracing() ->
-%%     spawn(timer, sleep, [5000]),
-    timer:sleep(500),
     timer:sleep(1000),
-    ?assertEqual(
-        1,
+    timer:sleep(1000),
+    ?assertMatch(
+        {value, {ok, V}} when V >= 1000000,
         msg_accumulator:get_message()
     ).
