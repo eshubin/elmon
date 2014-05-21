@@ -4,6 +4,8 @@
 
 -export([get_message/0, start/0]).
 
+-export([crashing_function/0, sleep/1]).
+
 %% gen_event callbacks
 -export([
     init/1,
@@ -35,4 +37,10 @@ handle_call(get, Q) ->
 
 terminate(_Arg, _State) ->
     ok.
+
+crashing_function() ->
+    throw(aborted).
+
+sleep(Time) ->
+    timer:sleep(Time).
 

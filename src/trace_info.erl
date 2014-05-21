@@ -38,7 +38,7 @@ init(TraceTargets) ->
             case code:is_sticky(Module) of
                 true -> ok;
                 false ->
-                    {module, Module} = code:load_file(Module)
+                    code:load_file(Module)
             end
         end,
         TraceTargets
@@ -74,20 +74,20 @@ handle_info(
     true = ets:insert_new(CallRecords, {Key, Timestamp}),
     {noreply, State};
 handle_info(
-    {trace_ts, Pid, return_from, {Mod, Fun, Arity},
+    {trace_ts, Pid, return_from, MFA,
         ReturnValue, FinishTimestamp} = Info,
     #state{call_records = CallRecords} = State
 ) ->
     error_logger:info_msg("return: ~p~n", [Info]),
-    Key = {Pid, {Mod, Fun, Arity}},
-    StartTimestamp = ets:lookup_element(CallRecords, Key, 2),
-    ets:delete(CallRecords, Key),
-    MonitorInfo = {
-        ReturnValue,
-        timer:now_diff(FinishTimestamp, StartTimestamp)
-    },
-    error_logger:info_msg("monitor: ~p~n", [MonitorInfo]),
-    reporter:notify(MonitorInfo),
+    handle_finish(Pid, MFA, FinishTimestamp, ReturnValue, CallRecords),
+    {noreply, State};
+handle_info(
+    {trace_ts, Pid, exception_from, MFA,
+        ErrorInfo, FinishTimestamp} = Info,
+    #state{call_records = CallRecords} = State
+) ->
+    error_logger:info_msg("fail: ~p~n", [Info]),
+    handle_finish(Pid, MFA, FinishTimestamp, ErrorInfo, CallRecords),
     {noreply, State}.
 
 
@@ -95,13 +95,26 @@ handle_info(
 %%% Internal functions
 %%%===================================================================
 
+
+handle_finish(Pid, {Mod, Fun, Arity}, FinishTimestamp, Return, CallRecords) ->
+    Key = {Pid, {Mod, Fun, Arity}},
+    StartTimestamp = ets:lookup_element(CallRecords, Key, 2),
+    ets:delete(CallRecords, Key),
+    MonitorInfo = {
+        Return,
+        timer:now_diff(FinishTimestamp, StartTimestamp)
+    },
+    error_logger:info_msg("monitor: ~p~n", [MonitorInfo]),
+    reporter:notify(MonitorInfo).
+
+
 toggle_trace(Enabled) ->
     0 = erlang:trace(new, Enabled, [call, timestamp]).
 
 toggle_trace_pattern(MatchSpec, TraceTargets) ->
     lists:foreach(
         fun(MFA) ->
-            1 = erlang:trace_pattern(MFA, MatchSpec, [local])
+            1 = erlang:trace_pattern(MFA, MatchSpec, [global])
         end,
         TraceTargets
     ).
@@ -135,19 +148,38 @@ trace_test_() ->
         fun() ->
             reporter:start_link(),
             msg_accumulator:start(),
-            start_link([{timer, sleep, 1}])
+            start_link([{msg_accumulator, sleep, 1},
+                {msg_accumulator,crashing_function, 0}])
         end,
         fun(_) ->
             [
-                fun test_sleep_tracing/0
+                fun test_sleep_tracing/0,
+                fun test_crash/0
             ]
         end
     }.
 
-test_sleep_tracing() ->
+test_crash() ->
+    spawn(msg_accumulator, crashing_function, []),
     timer:sleep(1000),
+    ?assertMatch(
+        {value,{{error,{nocatch,aborted}},_}},
+        msg_accumulator:get_message()
+    ),
+    ?assertEqual(
+        empty,
+        msg_accumulator:get_message()
+    ).
+
+test_sleep_tracing() ->
+    msg_accumulator:sleep(1000),
     timer:sleep(1000),
     ?assertMatch(
         {value, {ok, V}} when V >= 1000000,
         msg_accumulator:get_message()
+    ),
+    ?assertEqual(
+        empty,
+        msg_accumulator:get_message()
     ).
+
