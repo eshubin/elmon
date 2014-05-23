@@ -31,6 +31,8 @@ start_link(TraceTargets) ->
 
 
 init(TraceTargets) ->
+    error_logger:info_msg("Init!!!~n"),
+    erlang:process_flag(trap_exit, true),
     toggle_trace(true),
 
     lists:foreach(
@@ -60,6 +62,7 @@ terminate(
         call_records = CallRecords
     }
 ) ->
+    error_logger:info_msg("Terminate!!!~n"),
     ets:delete(CallRecords),
     toggle_trace_pattern(false, TraceTargets),
     toggle_trace(false),
@@ -88,7 +91,9 @@ handle_info(
 ) ->
     error_logger:info_msg("fail: ~p~n", [Info]),
     handle_finish(Pid, MFA, FinishTimestamp, ErrorInfo, CallRecords),
-    {noreply, State}.
+    {noreply, State};
+handle_info({'EXIT', _, Reason}, State) ->
+    {stop, Reason, State}.
 
 
 %%%===================================================================
@@ -126,21 +131,33 @@ toggle_trace_pattern(MatchSpec, TraceTargets) ->
 -include_lib("eunit/include/eunit.hrl").
 
 cleanup_test() ->
-    timer:sleep(0),
-    {ok, TracePid} = start_link([{timer, sleep, 1}]),
+    TracedFunction = {timer, sleep, 1},
+    {ok, TracePid} = start_link([TracedFunction]),
     {ok, TestPid} = gen_event:start_link(),
 
     ?assertEqual(
         {tracer, TracePid},
         erlang:trace_info(TestPid, tracer)
     ),
+    ?assertEqual(
+        {traced, global},
+        erlang:trace_info(TracedFunction, traced)
+    ),
 
     unlink(TracePid),
-    exit(TracePid, kill),
+    exit(TracePid, stop),
+
+    timer:sleep(1000),
+
     ?assertEqual(
         {tracer, []},
         erlang:trace_info(TestPid, tracer)
+    ),
+    ?assertEqual(
+        {traced, false},
+        erlang:trace_info(TracedFunction, traced)
     ).
+
 
 trace_test_() ->
     {
@@ -150,6 +167,10 @@ trace_test_() ->
             msg_accumulator:start(),
             start_link([{msg_accumulator, sleep, 1},
                 {msg_accumulator,crashing_function, 0}])
+        end,
+        fun({ok, TracePid}) ->
+            unlink(TracePid),
+            exit(TracePid, stop)
         end,
         fun(_) ->
             [
