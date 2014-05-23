@@ -1,6 +1,7 @@
 -module(trace_info).
 
 -include_lib("stdlib/include/ms_transform.hrl").
+-include_lib("elmon/include/elmon.hrl").
 
 -behaviour(gen_server).
 
@@ -31,7 +32,6 @@ start_link(TraceTargets) ->
 
 
 init(TraceTargets) ->
-    error_logger:info_msg("Init!!!~n"),
     erlang:process_flag(trap_exit, true),
     toggle_trace(true),
 
@@ -62,35 +62,38 @@ terminate(
         call_records = CallRecords
     }
 ) ->
-    error_logger:info_msg("Terminate!!!~n"),
     ets:delete(CallRecords),
     toggle_trace_pattern(false, TraceTargets),
     toggle_trace(false),
     ok.
 
 handle_info(
-    {trace_ts, Pid, call, {Mod, Fun, ArgList}, Timestamp} = Info,
+    {trace_ts, Pid, call, {Mod, Fun, ArgList}, Timestamp},
     #state{call_records = CallRecords} = State
 ) ->
-    error_logger:info_msg("call: ~p~n", [Info]),
     Key = {Pid, {Mod, Fun, length(ArgList)}},
     true = ets:insert_new(CallRecords, {Key, Timestamp}),
     {noreply, State};
 handle_info(
     {trace_ts, Pid, return_from, MFA,
-        ReturnValue, FinishTimestamp} = Info,
+        ReturnValue, FinishTimestamp},
     #state{call_records = CallRecords} = State
 ) ->
-    error_logger:info_msg("return: ~p~n", [Info]),
-    handle_finish(Pid, MFA, FinishTimestamp, ReturnValue, CallRecords),
+    handle_finish(
+        Pid, MFA, FinishTimestamp,
+        #return_value{value = ReturnValue},
+        CallRecords
+    ),
     {noreply, State};
 handle_info(
     {trace_ts, Pid, exception_from, MFA,
-        ErrorInfo, FinishTimestamp} = Info,
+        ErrorInfo, FinishTimestamp},
     #state{call_records = CallRecords} = State
 ) ->
-    error_logger:info_msg("fail: ~p~n", [Info]),
-    handle_finish(Pid, MFA, FinishTimestamp, ErrorInfo, CallRecords),
+    handle_finish(
+        Pid, MFA, FinishTimestamp,
+        #exception{description = ErrorInfo},
+        CallRecords),
     {noreply, State};
 handle_info({'EXIT', _, Reason}, State) ->
     {stop, Reason, State}.
@@ -109,7 +112,6 @@ handle_finish(Pid, {Mod, Fun, Arity}, FinishTimestamp, Return, CallRecords) ->
         Return,
         timer:now_diff(FinishTimestamp, StartTimestamp)
     },
-    error_logger:info_msg("monitor: ~p~n", [MonitorInfo]),
     reporter:notify(MonitorInfo).
 
 
@@ -188,7 +190,7 @@ test_crash() ->
     spawn(msg_accumulator, crashing_function, []),
     timer:sleep(1000),
     ?assertMatch(
-        {value,{{error,{nocatch,aborted}},_}},
+        {value,{#exception{description = {error,{nocatch,aborted}}},_}},
         msg_accumulator:get_message()
     ),
     ?assertEqual(
@@ -200,7 +202,7 @@ test_sleep_tracing() ->
     msg_accumulator:sleep(1000),
     timer:sleep(1000),
     ?assertMatch(
-        {value, {ok, V}} when V >= 1000000,
+        {value, {#return_value{value = ok}, V}} when V >= 1000000,
         msg_accumulator:get_message()
     ),
     ?assertEqual(
@@ -212,7 +214,7 @@ test_recursive() ->
     msg_accumulator:recursive_sleep(2),
     timer:sleep(1000),
     ?assertMatch(
-        {value, {ok, V}} when V >= 2000000,
+        {value, {#return_value{value = ok}, V}} when V >= 2000000,
             msg_accumulator:get_message()
     ),
     ?assertEqual(

@@ -9,6 +9,6 @@
                  ]},
   {mod, { elmon_app, []}},
   {env, [
-      {trace_targets, [{lists, seq, 2}]}
+      {trace_targets, []}
   ]}
  ]}.
