@@ -165,8 +165,11 @@ trace_test_() ->
         fun() ->
             reporter:start_link(),
             msg_accumulator:start(),
-            start_link([{msg_accumulator, sleep, 1},
-                {msg_accumulator,crashing_function, 0}])
+            start_link([
+                {msg_accumulator, sleep, 1},
+                {msg_accumulator,crashing_function, 0},
+                {msg_accumulator, recursive_sleep, 1}
+            ])
         end,
         fun({ok, TracePid}) ->
             unlink(TracePid),
@@ -175,7 +178,8 @@ trace_test_() ->
         fun(_) ->
             [
                 fun test_sleep_tracing/0,
-                fun test_crash/0
+                fun test_crash/0,
+                fun test_recursive/0
             ]
         end
     }.
@@ -203,4 +207,17 @@ test_sleep_tracing() ->
         empty,
         msg_accumulator:get_message()
     ).
+
+test_recursive() ->
+    msg_accumulator:recursive_sleep(2),
+    timer:sleep(1000),
+    ?assertMatch(
+        {value, {ok, V}} when V >= 2000000,
+            msg_accumulator:get_message()
+    ),
+    ?assertEqual(
+        empty,
+        msg_accumulator:get_message()
+    ).
+
 

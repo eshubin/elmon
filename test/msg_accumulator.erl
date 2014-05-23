@@ -4,7 +4,7 @@
 
 -export([get_message/0, start/0]).
 
--export([crashing_function/0, sleep/1]).
+-export([crashing_function/0, sleep/1, recursive_sleep/1]).
 
 %% gen_event callbacks
 -export([
@@ -43,4 +43,10 @@ crashing_function() ->
 
 sleep(Time) ->
     timer:sleep(Time).
+
+recursive_sleep(0) ->
+    ok;
+recursive_sleep(N) ->
+    timer:sleep(1000),
+    recursive_sleep(N-1).
 
