@@ -132,6 +132,8 @@ toggle_trace_pattern(MatchSpec, TraceTargets) ->
 
 -include_lib("eunit/include/eunit.hrl").
 
+-define(MSG_WAIT_TIMEOUT, 100).
+
 cleanup_test() ->
     TracedFunction = {timer, sleep, 1},
     {ok, TracePid} = start_link([TracedFunction]),
@@ -149,7 +151,7 @@ cleanup_test() ->
     unlink(TracePid),
     exit(TracePid, stop),
 
-    timer:sleep(1000),
+    timer:sleep(?MSG_WAIT_TIMEOUT),
 
     ?assertEqual(
         {tracer, []},
@@ -175,7 +177,10 @@ trace_test_() ->
         end,
         fun({ok, TracePid}) ->
             unlink(TracePid),
-            exit(TracePid, stop)
+            exit(TracePid, stop),
+            ReporterPid = whereis(reporter),
+            unlink(ReporterPid),
+            exit(ReporterPid, stop)
         end,
         fun(_) ->
             [
@@ -188,7 +193,7 @@ trace_test_() ->
 
 test_crash() ->
     spawn(msg_accumulator, crashing_function, []),
-    timer:sleep(1000),
+    timer:sleep(?MSG_WAIT_TIMEOUT),
     ?assertMatch(
         {value,{#exception{description = {error,{nocatch,aborted}}},_}},
         msg_accumulator:get_message()
@@ -200,7 +205,7 @@ test_crash() ->
 
 test_sleep_tracing() ->
     msg_accumulator:sleep(1000),
-    timer:sleep(1000),
+    timer:sleep(?MSG_WAIT_TIMEOUT),
     ?assertMatch(
         {value, {#return_value{value = ok}, V}} when V >= 1000000,
         msg_accumulator:get_message()
@@ -212,7 +217,7 @@ test_sleep_tracing() ->
 
 test_recursive() ->
     msg_accumulator:recursive_sleep(2),
-    timer:sleep(1000),
+    timer:sleep(?MSG_WAIT_TIMEOUT),
     ?assertMatch(
         {value, {#return_value{value = ok}, V}} when V >= 2000000,
             msg_accumulator:get_message()
