@@ -9,6 +9,13 @@
                  ]},
   {mod, { elmon_app, []}},
   {env, [
-      {trace_targets, []}
+      {trace_targets, [
+          {msg_accumulator, sleep, 1},
+          {msg_accumulator,crashing_function, 0},
+          {msg_accumulator, recursive_sleep, 1}
+      ]},
+      {trace_handlers, [
+          {msg_accumulator, []}
+      ]}
   ]}
  ]}.

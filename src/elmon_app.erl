@@ -11,7 +11,15 @@
 
 start(_StartType, _StartArgs) ->
     {ok, TraceTargets} = application:get_env(elmon, trace_targets),
-    elmon_sup:start_link(TraceTargets).
+    {ok, TraceHandlers} = application:get_env(elmon, trace_handlers),
+    R = elmon_sup:start_link(TraceTargets),
+    lists:foreach(
+        fun({Handler, Args}) ->
+            reporter:add_handler(Handler, Args)
+        end,
+        TraceHandlers
+    ),
+    R.
 
 stop(_State) ->
     ok.
