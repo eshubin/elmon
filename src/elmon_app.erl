@@ -42,16 +42,16 @@ launch_test_() ->
         fun(_) ->
             [
                 ?_assertEqual(
-                    [{specs,2},
-                        {active,2},
-                        {supervisors,0},
-                        {workers,2}],
+                    [{specs, 2},
+                        {active, 2},
+                        {supervisors, 0},
+                        {workers, 2}],
                     supervisor:count_children(elmon_sup)
                 ),
                 ?_assertMatch(
                     [
-                        {trace_info,_,worker,[trace_info]},
-                        {reporter,_,worker,[reporter]}
+                        {trace_info, _, worker, [trace_info]},
+                        {reporter, _, worker, [reporter]}
                     ],
                     supervisor:which_children(elmon_sup)
                 )
@@ -59,3 +59,20 @@ launch_test_() ->
         end
     }.
 
+correctness_test_() ->
+    {
+        setup,
+        fun() ->
+            ok = application:start(elmon)
+        end,
+        fun(_) ->
+            ok = application:stop(elmon)
+        end,
+        fun(_) ->
+            [
+                fun trace_info:test_recursive/0,
+                fun trace_info:test_crash/0,
+                fun trace_info:test_sleep_tracing/0
+            ]
+        end
+    }.

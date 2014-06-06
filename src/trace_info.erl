@@ -15,6 +15,12 @@
     handle_info/2
     ]).
 
+-export([
+    test_crash/0,
+    test_sleep_tracing/0,
+    test_recursive/0
+]).
+
 -define(SERVER, ?MODULE).
 
 -record(state, {
