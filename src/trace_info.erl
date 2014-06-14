@@ -110,13 +110,14 @@ handle_info({'EXIT', _, Reason}, State) ->
 %%%===================================================================
 
 
-handle_finish(Pid, {Mod, Fun, Arity}, FinishTimestamp, Return, CallRecords) ->
-    Key = {Pid, {Mod, Fun, Arity}},
+handle_finish(Pid, MFA, FinishTimestamp, Return, CallRecords) ->
+    Key = {Pid, MFA},
     StartTimestamp = ets:lookup_element(CallRecords, Key, 2),
     ets:delete(CallRecords, Key),
     MonitorInfo = {
-        Return,
-        timer:now_diff(FinishTimestamp, StartTimestamp)
+        MFA,
+        timer:now_diff(FinishTimestamp, StartTimestamp),
+        Return
     },
     reporter:notify(MonitorInfo).
 
@@ -201,7 +202,12 @@ test_crash() ->
     spawn(msg_accumulator, crashing_function, []),
     timer:sleep(?MSG_WAIT_TIMEOUT),
     ?assertMatch(
-        {value,{#exception{description = {error,{nocatch,aborted}}},_}},
+        {value,{
+            _, _,
+            #exception{
+                description = {error,{nocatch,aborted}}
+            }
+        }},
         msg_accumulator:get_message()
     ),
     ?assertEqual(
@@ -213,7 +219,10 @@ test_sleep_tracing() ->
     msg_accumulator:sleep(1000),
     timer:sleep(?MSG_WAIT_TIMEOUT),
     ?assertMatch(
-        {value, {#return_value{value = ok}, V}} when V >= 1000000,
+        {value, {
+            _, V,
+            #return_value{value = ok}
+        }} when V >= 1000000,
         msg_accumulator:get_message()
     ),
     ?assertEqual(
@@ -225,7 +234,7 @@ test_recursive() ->
     msg_accumulator:recursive_sleep(2),
     timer:sleep(?MSG_WAIT_TIMEOUT),
     ?assertMatch(
-        {value, {#return_value{value = ok}, V}} when V >= 2000000,
+        {value, {_, V, #return_value{value = ok}}} when V >= 2000000,
             msg_accumulator:get_message()
     ),
     ?assertEqual(
