@@ -203,7 +203,7 @@ test_crash() ->
     timer:sleep(?MSG_WAIT_TIMEOUT),
     ?assertMatch(
         {value,{
-            _, _,
+            {msg_accumulator, crashing_function , 0}, _,
             #exception{
                 description = {error,{nocatch,aborted}}
             }
@@ -220,7 +220,7 @@ test_sleep_tracing() ->
     timer:sleep(?MSG_WAIT_TIMEOUT),
     ?assertMatch(
         {value, {
-            _, V,
+            {msg_accumulator, sleep ,1}, V,
             #return_value{value = ok}
         }} when V >= 1000000,
         msg_accumulator:get_message()
@@ -234,8 +234,9 @@ test_recursive() ->
     msg_accumulator:recursive_sleep(2),
     timer:sleep(?MSG_WAIT_TIMEOUT),
     ?assertMatch(
-        {value, {_, V, #return_value{value = ok}}} when V >= 2000000,
-            msg_accumulator:get_message()
+        {value, {{msg_accumulator, recursive_sleep ,1}, V,
+            #return_value{value = ok}}} when V >= 2000000,
+        msg_accumulator:get_message()
     ),
     ?assertEqual(
         empty,
